@@ -1,0 +1,90 @@
+name: Build AI Video Editor v4 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'AI_Video_Editor_v4_Android_Project.zip'
+      - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify project archive exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f AI_Video_Editor_v4_Android_Project.zip
+          unzip -t AI_Video_Editor_v4_Android_Project.zip >/dev/null
+
+      - name: Extract Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf android-project
+          mkdir android-project
+          unzip -q AI_Video_Editor_v4_Android_Project.zip -d android-project
+          test -f android-project/settings.gradle.kts
+          test -f android-project/app/build.gradle.kts
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Verify project source
+        working-directory: android-project
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'com.android.application' build.gradle.kts
+          grep -q 'compileSdk = 36' app/build.gradle.kts
+
+      - name: Build debug APK
+        working-directory: android-project
+        shell: bash
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='android-project/app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$APK"
+          sha256sum "$APK" | tee apk-sha256.txt
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Video-Editor-v4-APK
+          path: |
+            android-project/app/build/outputs/apk/debug/app-debug.apk
+            apk-sha256.txt
+          if-no-files-found: error
+          retention-days: 14
